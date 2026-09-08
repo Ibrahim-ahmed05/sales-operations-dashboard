@@ -31,7 +31,7 @@ export function monthsInRange(range: MonthRange): string[] {
 export function previousRange(range: MonthRange): MonthRange | null {
   const inRange = monthsInRange(range);
   const startIdx = ALL_MONTHS.indexOf(inRange[0] ?? "");
-  if (startIdx <= 0) return null;
+  if (startIdx < inRange.length) return null;
   const prevEnd = startIdx - 1;
   const prevStart = Math.max(0, prevEnd - (inRange.length - 1));
   return { from: ALL_MONTHS[prevStart]!, to: ALL_MONTHS[prevEnd]! };
@@ -59,9 +59,7 @@ function netProfit(o: OrderRow): number {
 }
 
 export function validOrders(range: MonthRange): OrderRow[] {
-  return dataset.orders.filter(
-    (o) => o.st !== CANCELLED && o.m >= range.from && o.m <= range.to,
-  );
+  return dataset.orders.filter((o) => o.st !== CANCELLED && o.m >= range.from && o.m <= range.to);
 }
 
 export function ordersInRange(range: MonthRange): OrderRow[] {
@@ -208,7 +206,8 @@ export interface ReceivablesTotals {
 }
 
 export function invoicesInRange(range: MonthRange): InvoiceRow[] {
-  return dataset.invoices.filter((i) => i.m >= range.from && i.m <= range.to);
+  const orderIds = new Set(ordersInRange(range).map((o) => o.id));
+  return dataset.invoices.filter((i) => orderIds.has(i.oid));
 }
 
 export function receivablesTotals(range: MonthRange): ReceivablesTotals {
@@ -391,7 +390,19 @@ export function overviewMetrics(range: MonthRange) {
   const series = monthlySeries(range);
   const prevSeries = prev ? monthlySeries(prev) : [];
 
-  return { range, prev, sales, prevSales, ops, prevOps, receivables, prevReceivables, inventory, series, prevSeries };
+  return {
+    range,
+    prev,
+    sales,
+    prevSales,
+    ops,
+    prevOps,
+    receivables,
+    prevReceivables,
+    inventory,
+    series,
+    prevSeries,
+  };
 }
 
 export type OverviewMetrics = ReturnType<typeof overviewMetrics>;
