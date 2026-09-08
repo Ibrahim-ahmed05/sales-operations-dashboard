@@ -43,15 +43,18 @@ export function signedPercent(value: number, digits = 1): string {
 
 /** "2026-08" -> "Aug 2026"; short -> "Aug '26" */
 export function monthLabel(key: string, short = false): string {
-  const [y, m] = key.split("-");
+  const y = key.slice(0, 4);
+  const m = key.slice(5, 7);
   const label = MONTH_LABELS[Number(m) - 1] ?? m;
   return short ? `${label} '${y.slice(2)}` : `${label} ${y}`;
 }
 
 export function dateLabel(iso: string): string {
   if (!iso) return "—";
-  const [y, m, d] = iso.split("-");
-  return `${Number(d)} ${MONTH_LABELS[Number(m) - 1]} ${y}`;
+  const y = iso.slice(0, 4);
+  const m = iso.slice(5, 7);
+  const d = iso.slice(8, 10);
+  return `${Number(d)} ${MONTH_LABELS[Number(m) - 1] ?? m} ${y}`;
 }
 
 export function deltaPct(current: number, previous: number): number | null {
