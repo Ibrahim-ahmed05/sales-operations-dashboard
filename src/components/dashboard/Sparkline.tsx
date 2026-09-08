@@ -19,7 +19,7 @@ const TONE: Record<string, string> = {
 
 export function Sparkline({ values, tone = "primary", width = 96, height = 28, className }: Props) {
   const id = useId().replace(/:/g, "");
-  const color = TONE[tone] ?? TONE.primary;
+  const color = TONE[tone] ?? "var(--primary)";
   if (values.length < 2) return <svg width={width} height={height} className={className} />;
 
   const min = Math.min(...values);
