@@ -1,10 +1,23 @@
 import { DatabaseSync } from "node:sqlite";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { copyFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-const bundledDatabase = resolve("var/dashboard.sqlite");
-const vercelDatabase = resolve(tmpdir(), "meridian-dashboard.sqlite");
+
+// Vercel executes server functions from a generated directory, so the process
+// working directory is not guaranteed to be the project root. Resolve the
+// bundled seed database from both locations used by local and traced builds.
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const bundledCandidates = [
+  resolve("var/dashboard.sqlite"),
+  resolve(moduleDir, "../var/dashboard.sqlite"),
+  resolve(moduleDir, "../../var/dashboard.sqlite"),
+  resolve(moduleDir, "../../../var/dashboard.sqlite"),
+];
+const bundledDatabase =
+  bundledCandidates.find((candidate) => existsSync(candidate)) || bundledCandidates[0];
+const vercelDatabase = join(tmpdir(), "meridian-dashboard.sqlite");
 if (process.env.VERCEL && !existsSync(vercelDatabase))
   copyFileSync(bundledDatabase, vercelDatabase);
 export const db = new DatabaseSync(
