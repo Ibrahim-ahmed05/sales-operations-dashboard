@@ -6,13 +6,13 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+const nitro = {
+  preset: "vercel",
+  vercel: { functions: { includeFiles: ["var/dashboard.sqlite"] } },
+};
+
 export default defineConfig({
-  nitro: {
-    preset: "vercel",
-    ...({
-      vercel: { functions: { includeFiles: ["var/dashboard.sqlite"] } },
-    } as any),
-  },
+  nitro,
   vite: { server: { fs: { deny: ["**/var/**", "**/.env*", "**/.git/**", "**/*.{pem,crt}"] } } },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
