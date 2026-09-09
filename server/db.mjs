@@ -1,7 +1,15 @@
 import { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
+import { copyFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-export const db = new DatabaseSync(process.env.DASHBOARD_DB || resolve("var/dashboard.sqlite"));
+const bundledDatabase = resolve("var/dashboard.sqlite");
+const vercelDatabase = resolve(tmpdir(), "meridian-dashboard.sqlite");
+if (process.env.VERCEL && !existsSync(vercelDatabase))
+  copyFileSync(bundledDatabase, vercelDatabase);
+export const db = new DatabaseSync(
+  process.env.DASHBOARD_DB || (process.env.VERCEL ? vercelDatabase : bundledDatabase),
+);
 db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,email TEXT UNIQUE NOT NULL,name TEXT NOT NULL,role TEXT CHECK(role IN ('Admin','Manager','Viewer')),salt TEXT NOT NULL,password_hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id INTEGER REFERENCES users(id),expires_at INTEGER);
