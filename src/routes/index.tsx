@@ -1,56 +1,108 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import * as Dialog from "@radix-ui/react-dialog";
 import {
   ArrowUpRight,
   ArrowDownToLine,
-  BarChart3,
-  Box,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  CircleDollarSign,
-  Layers3,
+  X,
   Search,
+  BarChart3,
+  Box,
   Truck,
   Wallet,
-  X,
-  SlidersHorizontal,
+  Trophy,
+  Activity,
+  Info,
+  RefreshCw,
 } from "lucide-react";
-import * as Dialog from "@radix-ui/react-dialog";
 import {
-  FULL_RANGE,
-  ALL_MONTHS,
-  overviewMetrics,
-  topCustomers,
-  topProducts,
-  channelBreakdown,
-  validOrders,
-  ordersInRange,
-  invoicesInRange,
-  agingOf,
-  type MonthRange,
-} from "@/lib/analytics";
-import { dataset } from "@/lib/dataset";
-import { currency, currencyExact, monthLabel, percent, compactNumber } from "@/lib/format";
-import { SalesTrendChart } from "@/components/dashboard/SalesTrendChart";
-import { InventoryHealth } from "@/components/dashboard/InventoryHealth";
-import { GlassOrb } from "@/components/dashboard/GlassOrb";
-import { Sparkline } from "@/components/dashboard/Sparkline";
-
+  DataChart,
+  formatValue,
+  type Unit,
+  type PanelData,
+} from "@/components/dashboard/DataChart";
 export const Route = createFileRoute("/")({ component: Dashboard });
-type Detail = { title: string; note: string; columns: string[]; rows: (string | number)[][] };
-const money = (v: number) => currency(v, { withSymbol: false });
-const tabs = ["Overview", "Sales", "Operations", "Inventory", "Receivables"] as const;
-type Tab = (typeof tabs)[number];
-function download(detail: Detail) {
-  const csv = [detail.columns, ...detail.rows]
-    .map((row) =>
-      row
+type Role = "Admin" | "Manager" | "Viewer";
+interface User {
+  name: string;
+  email: string;
+  role: Role;
+}
+interface Metric {
+  id: string;
+  label: string;
+  value: number | null;
+  unit: Unit;
+  description: string;
+  detail: string;
+  snapshot?: boolean;
+}
+interface Result {
+  metrics?: Metric[];
+  metric?: Metric;
+  panels?: PanelData[];
+  panel?: PanelData;
+  rows?: { id: string; label: string; value: number }[];
+  recordCount: number;
+  generatedAt: string;
+  discrepancies?: number;
+}
+interface Context {
+  today: string;
+  sourceLastOrderDate: string;
+  sourceFirstOrderDate: string;
+  inventoryUpdatedAt: string;
+  role: Role;
+  importSummary?: {
+    accepted: Record<string, number>;
+    rejected: Record<string, number>;
+    notes: string[];
+  };
+}
+interface DetailResult {
+  columns: string[];
+  rows: Record<string, string | number | null>[];
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  recordCount: number;
+  generatedAt: string;
+  basis?: { cogs: number; averageInventory: number; days: number };
+}
+const tabs = [
+  { id: "sales", label: "Sales", title: "Sales performance", icon: BarChart3 },
+  { id: "orders", label: "Orders", title: "Orders & fulfillment", icon: Truck },
+  { id: "inventory", label: "Inventory", title: "Inventory overview", icon: Box },
+  { id: "receivables", label: "Receivables", title: "Receivables overview", icon: Wallet },
+  { id: "performers", label: "Top performers", title: "Top performers", icon: Trophy },
+  { id: "operational", label: "Operations", title: "Operational KPIs", icon: Activity },
+];
+const dateLabel = (v: string) =>
+  new Date(v + "T00:00:00Z").toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, { credentials: "same-origin", ...(signal ? { signal } : {}) });
+  const body = await response.json();
+  if (!response.ok) throw Error(body.error || "Unable to load data");
+  return body as T;
+}
+function csvDownload(title: string, columns: string[], rows: (string | number | null)[][]) {
+  const csv = [columns, ...rows]
+    .map((r) =>
+      r
         .map(
           (v) =>
             '"' +
-            String(v)
-              .replace(/^[=+@-]/, "'$&")
+            String(v ?? "")
+              .replace(/^[=+@]/, "'$&")
               .replaceAll('"', '""') +
             '"',
         )
@@ -60,698 +112,494 @@ function download(detail: Detail) {
   const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = detail.title.toLowerCase().replaceAll(" ", "-") + ".csv";
+  a.download = title + ".csv";
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function Panel({
-  title,
-  sub,
-  children,
-  action,
-  className = "",
-}: {
-  title: string;
-  sub?: string;
-  children: ReactNode;
-  action?: () => void;
-  className?: string;
-}) {
-  return (
-    <section className={"panel " + className}>
-      <div className="panel-heading">
-        <div>
-          <h2>{title}</h2>
-          {sub && <p>{sub}</p>}
-        </div>
-        {action && (
-          <button className="icon-button" aria-label={"View " + title} onClick={action}>
-            <ArrowUpRight size={17} />
-          </button>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
 function Dashboard() {
-  const [tab, setTab] = useState<Tab>("Overview");
-  const [range, setRange] = useState<MonthRange>(FULL_RANGE);
-  const [dates, setDates] = useState(false);
-  const [compare, setCompare] = useState(true);
-  const [detail, setDetail] = useState<Detail | null>(null);
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
-  const m = useMemo(() => overviewMetrics(range), [range]);
-  const { sales: s, ops: o, inventory: inv, receivables: r } = m;
-  const customers = topCustomers(range, 5);
-  const products = topProducts(range, 5);
-  function open(d: Detail) {
-    setQuery("");
-    setPage(0);
-    setDetail(d);
-  }
-  function orderDetail(status?: string) {
-    open({
-      title: status || "Sales orders",
-      note: `${monthLabel(range.from)} – ${monthLabel(range.to)} · PKR · Cancelled orders excluded`,
-      columns: ["Order", "Customer", "Date", "Status", "Net sales (PKR)"],
-      rows: (status
-        ? ordersInRange(range).filter((x) =>
-            status === "Overdue open orders" ? x.overdueOpen : x.ds === status,
-          )
-        : validOrders(range)
-      ).map((x) => [x.id, x.cn, x.d, x.ds || x.st, Math.round(x.rev - x.ret)]),
-    });
-  }
-  function stockDetail(state?: string) {
-    open({
-      title: state || "Inventory",
-      note: "Snapshot as of 1 Sep 2026 · Available = on hand − reserved",
-      columns: ["Product", "SKU", "Warehouse", "Available", "Reorder", "Status"],
-      rows: dataset.inventory
-        .filter((x) => !state || x.state === state)
-        .map((x) => [x.name, x.sku, x.warehouse, x.avail, x.reorder, x.state]),
-    });
-  }
-  function invoiceDetail(bucket?: string) {
-    open({
-      title: bucket ? bucket + " receivables" : "Open receivables",
-      note: "Orders in selected range · Aging as of 1 Sep 2026 · PKR",
-      columns: ["Invoice", "Customer", "Due date", "Outstanding (PKR)", "Days overdue"],
-      rows: invoicesInRange(range)
-        .filter((x) => x.out > 0 && (!bucket || agingOf(x) === bucket))
-        .sort((a, b) => b.out - a.out)
-        .map((x) => [x.id, x.cn, x.due, Math.round(x.out), x.overdueDays]),
-    });
-  }
-  function rankingDetail(product = false) {
-    const rows = product ? topProducts(range, 72) : topCustomers(range, 120);
-    open({
-      title: product ? "Product sales" : "Customer sales",
-      note: product ? "Gross line sales before returns · PKR" : "Net sales after returns · PKR",
-      columns: ["Name", "Details", "Sales (PKR)", "Share"],
-      rows: rows.map((x) => [x.label, x.sub, Math.round(x.value), percent(x.share)]),
-    });
-  }
-  const exportData: Detail = {
-    title: `${tab} ${range.from} to ${range.to}`,
-    note: "",
-    columns: ["Metric", "Value", "Basis"],
-    rows: [
-      ["Net sales", s.netSales, "PKR"],
-      ["Gross profit", s.grossProfit, "PKR; proportional margin reversal for returns"],
-      ["Outstanding", r.outstanding, "PKR; order date cohort"],
-      ["Overdue", r.overdue, "PKR; 2026-09-01"],
-      ["On-time delivery", o.onTimeRate, "%"],
-      ["In stock", inv.inStock, "SKUs; snapshot 2026-09-01"],
-      ["Low stock", inv.lowStock, "SKUs"],
-      ["Out of stock", inv.outOfStock, "SKUs"],
-      ["Discrepancies", inv.discrepancy, "SKUs"],
-    ],
+  return <Workspace user={{ name: "Demo User", email: "demo@meridian.local", role: "Manager" }} />;
+}
+function Workspace({ user }: { user: User }) {
+  const [tab, setTab] = useState("sales");
+  const [pageSize, setPageSize] = useState(6);
+  useEffect(() => {
+    const q = window.matchMedia("(max-width:760px)");
+    const update = () => setPageSize(q.matches ? 1 : 6);
+    update();
+    q.addEventListener("change", update);
+    return () => q.removeEventListener("change", update);
+  }, []);
+  const context = useQuery({
+    queryKey: ["context", user.role],
+    queryFn: ({ signal }) => api<Context>("/api/dashboard/context", signal),
+  });
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null),
+    [draft, setDraft] = useState({ from: "", to: "" }),
+    [dateOpen, setDateOpen] = useState(false),
+    [dateError, setDateError] = useState("");
+  const [detail, setDetail] = useState<{ kind: string; title: string; description: string } | null>(
+      null,
+    ),
+    [page, setPage] = useState(1),
+    [search, setSearch] = useState(""),
+    [searchText, setSearchText] = useState(""),
+    [chartPage, setChartPage] = useState(0),
+    [definitions, setDefinitions] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setSearch(searchText);
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(id);
+  }, [searchText]);
+  // Start with the full imported dataset so the first view is useful even when
+  // the source's latest transaction predates today's calendar date.
+  const currentRange = range || {
+    from: context.data?.sourceFirstOrderDate || "",
+    to: context.data?.sourceLastOrderDate || "",
   };
-  const kpis = [
-    {
-      label: "Net sales",
-      value: money(s.netSales),
-      unit: "PKR",
-      icon: BarChart3,
-      note: `${compactNumber(s.orders)} qualifying orders`,
-      values: m.series.map((x) => x.netSales),
-      action: () => orderDetail(),
-    },
-    {
-      label: "Gross profit",
-      value: money(s.grossProfit),
-      unit: "PKR",
-      icon: CircleDollarSign,
-      note: `${percent(s.marginPct)} net margin`,
-      values: m.series.map((x) => x.grossProfit),
-      action: () =>
-        open({
-          title: "Gross profit calculation",
-          note: "Returns reverse profit using each order’s gross margin.",
-          columns: ["Metric", "PKR"],
-          rows: [
-            ["Gross sales", s.grossSales],
-            ["Returns", s.returns],
-            ["Net sales", s.netSales],
-            ["Net gross profit", s.grossProfit],
-          ],
-        }),
-    },
-    {
-      label: "Outstanding receivables",
-      value: money(r.outstanding),
-      unit: "PKR",
-      icon: Wallet,
-      note: `${percent(r.overdueSharePct)} overdue`,
-      warning: true,
-      action: () => invoiceDetail(),
-    },
-    {
-      label: "Inventory health",
-      value: percent(inv.healthPct),
-      unit: "",
-      icon: Box,
-      note: `${inv.inStock} of ${inv.products} SKUs in stock`,
-      action: () => stockDetail(),
-    },
-    {
-      label: "On-time delivery",
-      value: percent(o.onTimeRate),
-      unit: "",
-      icon: Truck,
-      note: `${compactNumber(o.delivered)} completed deliveries`,
-      values: m.series.map((x) => (x.delivered ? (100 * x.onTime) / x.delivered : 0)),
-      action: () => orderDetail("On Time"),
-    },
-  ];
-  const trend = (
-    <Panel
-      title="Sales performance"
-      sub="Net sales over time · PKR"
-      className="trend-panel"
-      action={() => orderDetail()}
-    >
-      <div className="chart-summary">
-        <strong>{currency(s.netSales)}</strong>
-        <span className="legend">
-          <i />
-          Net sales
-        </span>
-        <label className="comparison">
-          <input
-            type="checkbox"
-            checked={compare && !!m.prev}
-            disabled={!m.prev}
-            onChange={(e) => setCompare(e.target.checked)}
-          />
-          {m.prev ? "Previous period" : "No prior period available"}
-        </label>
-      </div>
-      <div className="chart">
-        <SalesTrendChart
-          series={m.series}
-          compare={m.prevSeries}
-          showCompare={compare && !!m.prev}
-        />
-      </div>
-      <div className="panel-foot">
-        <span>
-          {monthLabel(range.from)} — {monthLabel(range.to)}
-        </span>
-        <span>
-          {m.series.length} months <span className="dot-separator">·</span> Returns deducted
-        </span>
-      </div>
-    </Panel>
+  const queryString = new URLSearchParams(currentRange).toString();
+  const allowed = user.role !== "Viewer";
+  const active = tabs.find((t) => t.id === tab)!;
+  const endpoints = useMemo(
+    () =>
+      tab === "sales"
+        ? ["kpis/sales", "trends/sales"]
+        : tab === "orders"
+          ? ["kpis/orders"]
+          : tab === "inventory"
+            ? ["kpis/inventory/counts", ...(allowed ? ["kpis/inventory/value"] : [])]
+            : tab === "receivables"
+              ? ["kpis/receivables", "receivables/aging"]
+              : tab === "performers"
+                ? ["rankings/products", "rankings/customers", "rankings/segments"]
+                : ["kpis/operational"],
+    [tab, allowed],
   );
-  const aging = (
-    <Panel
-      title="Receivables aging"
-      sub="Open balances · as of 1 Sep 2026"
-      action={() => invoiceDetail()}
-    >
-      <div className="aging-bars">
-        {[
-          { label: "Current", value: r.current, color: "var(--primary)" },
-          { label: "Due Soon", value: r.dueSoon, color: "var(--warning)" },
-          { label: "Overdue", value: r.overdue, color: "var(--critical)" },
-        ].map((x) => (
-          <button className="bar-row" key={x.label} onClick={() => invoiceDetail(x.label)}>
-            <span>{x.label}</span>
-            <strong>{currency(x.value)}</strong>
-            <div className="bar-track">
-              <div
-                style={{
-                  width: `${r.outstanding ? (x.value / r.outstanding) * 100 : 0}%`,
-                  background: x.color,
-                }}
-              />
-            </div>
-          </button>
-        ))}
-      </div>
-      <div className="insight">
-        <span className="status-dot" />
-        {percent(r.overdueSharePct)} of outstanding needs follow-up
-      </div>
-    </Panel>
-  );
-  const health = (
-    <Panel title="Inventory health" sub="Current stock snapshot" action={() => stockDetail()}>
-      <div className="health">
-        <InventoryHealth inv={inv} onSelect={stockDetail} size={126} />
-      </div>
-      <div className="panel-foot">
-        <span>Inventory value</span>
-        <strong>{currency(inv.value)}</strong>
-      </div>
-    </Panel>
-  );
-  const operations = (
-    <Panel
-      title="Operational performance"
-      sub="Delivery reliability at a glance"
-      action={() => setTab("Operations")}
-    >
-      <div className="ops-main">
-        <strong>{percent(o.onTimeRate)}</strong>
-        <span className="soft-badge">On-time deliveries</span>
-      </div>
-      <div className="delivery-track">
-        <div style={{ width: `${o.onTimeRate}%` }} />
-      </div>
-      <div className="delivery-key">
-        <span>
-          <i />
-          {compactNumber(o.onTime)} on time
-        </span>
-        <span>
-          <i />
-          {compactNumber(o.delayed)} delayed
-        </span>
-      </div>
-      <div className="ops-bottom">
-        <button onClick={() => orderDetail("Delayed")}>
-          <strong>
-            {o.avgLead.toFixed(1)}
-            <small> days</small>
-          </strong>
-          <span>Average delivery</span>
-        </button>
-        <button onClick={() => orderDetail("Overdue open orders")}>
-          <strong>
-            {o.overdueOpen}
-            <ArrowUpRight size={14} />
-          </strong>
-          <span>Overdue open orders</span>
-        </button>
-      </div>
-    </Panel>
-  );
-  const stock = (
-    <Panel
-      title="Stock requiring attention"
-      sub={`${inv.attention.length} products to review`}
-      action={() => stockDetail()}
-    >
-      <div className="mini-table">
-        <div className="table-labels">
-          <span>Product / SKU</span>
-          <span>Available</span>
-          <span>Status</span>
-        </div>
-        {inv.attention.slice(0, 4).map((x) => (
-          <button key={x.pid} onClick={() => stockDetail(x.state)}>
-            <span>
-              <strong>{x.name}</strong>
-              <small>{x.sku}</small>
-            </span>
-            <b>{x.avail}</b>
-            <span className={"stock-badge " + (x.state === "Discrepancy" ? "purple" : "red")}>
-              {x.state === "Out of Stock" ? "Out of stock" : x.state}
-            </span>
-          </button>
-        ))}
-      </div>
-      <button className="text-link" onClick={() => stockDetail()}>
-        View all {inv.attention.length} exceptions <ArrowUpRight size={13} />
-      </button>
-    </Panel>
-  );
-  function ranking(product = false) {
-    return (
-      <Panel
-        title={product ? "Top products" : "Top customers"}
-        sub={product ? "By gross line sales · before returns" : "By net sales contribution"}
-        action={() => rankingDetail(product)}
-      >
-        <div className="rank-list">
-          {(product ? products : customers).map((x, i) => (
-            <button
-              key={x.id}
-              onClick={() =>
-                open({
-                  title: x.label,
-                  note: x.sub,
-                  columns: product ? ["Metric", "Value"] : ["Order", "Date", "Net sales (PKR)"],
-                  rows: product
-                    ? [
-                        ["Gross sales", currencyExact(x.value)],
-                        ["Share", percent(x.share)],
-                      ]
-                    : validOrders(range)
-                        .filter((o) => o.cid === x.id)
-                        .map((o) => [o.id, o.d, Math.round(o.rev - o.ret)]),
-                })
-              }
-            >
-              <span className="rank-num">{String(i + 1).padStart(2, "0")}</span>
-              <span className="rank-name">
-                <strong>{x.label}</strong>
-                <small>{x.sub}</small>
-              </span>
-              <span className="rank-value">
-                <strong>{money(x.value)}</strong>
-                <small>{percent(x.share)} of total</small>
-              </span>
-            </button>
-          ))}
-        </div>
-      </Panel>
-    );
+  const data = useQuery({
+    queryKey: ["dashboard", tab, queryString, user.role],
+    queryFn: ({ signal }) =>
+      Promise.all(
+        endpoints.map((p) => api<Result>("/api/dashboard/" + p + "?" + queryString, signal)),
+      ),
+    enabled: !!context.data,
+    staleTime: 60000,
+    retry: false,
+  });
+  const metrics: Metric[] = data.data?.flatMap((r) => r.metrics || []) || [];
+  let panels: PanelData[] = data.data?.flatMap((r) => r.panels || []) || [];
+  if (tab === "sales" && data.data?.[1]?.panel) panels = [data.data[1].panel, ...panels];
+  if (tab === "inventory" && data.data?.[1]?.metric) {
+    metrics.unshift(data.data[1].metric);
+    if (data.data[1].panel) panels.splice(1, 0, data.data[1].panel);
   }
-  const channels = (
-    <Panel
-      title="Sales by channel"
-      sub="Share of net sales"
-      className="channel-panel"
-      action={() => orderDetail()}
-    >
-      <div className="aging-bars">
-        {channelBreakdown(range).map((x) => (
-          <div className="bar-row" key={x.channel}>
-            <span>{x.channel}</span>
-            <strong>{percent(x.share)}</strong>
-            <div className="bar-track">
-              <div style={{ width: `${x.share}%`, background: "var(--primary)" }} />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="panel-foot">
-        <span>Average order value</span>
-        <strong>{currency(s.aov)}</strong>
-      </div>
-    </Panel>
-  );
-  const filtered =
-    detail?.rows.filter((row) =>
-      row.some((v) => String(v).toLowerCase().includes(query.toLowerCase())),
-    ) ?? [];
-  const pageSize = 7;
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  if (tab === "receivables" && data.data?.[1]?.panel) panels = [data.data[1].panel, ...panels];
+  if (tab === "performers" && data.data) {
+    for (const [i, label] of ["Top product", "Top customer"].entries()) {
+      const best = data.data[i]?.rows?.[0];
+      metrics.push({
+        id: label,
+        label,
+        value: best?.value ?? null,
+        unit: "money",
+        description: best?.label || "No sales in selected period",
+        detail: best
+          ? (i === 0 ? "product:" : "customer:") + best.id
+          : i === 0
+            ? "products"
+            : "customers",
+      });
+    }
+    panels = [...data.data.slice(0, 2).flatMap((r) => (r.panel ? [r.panel] : [])), ...panels];
+  }
+  const canDetail = (kind: string) => allowed || kind === "lowstock";
+  function open(kind: string, title: string, description = "") {
+    if (!canDetail(kind)) return;
+    setDetail({ kind, title, description });
+    setPage(1);
+    setSearch("");
+    setSearchText("");
+  }
+  const [parentDetail, setParentDetail] = useState<typeof detail>(null);
+  const detailQuery = useQuery({
+    queryKey: ["detail", detail?.kind, queryString, page, pageSize, search, user.role],
+    queryFn: async ({ signal }) => {
+      if (detail?.kind.startsWith("order:") || detail?.kind.startsWith("invoice:")) {
+        const isOrder = detail.kind.startsWith("order:");
+        const raw = await api<{
+          generatedAt: string;
+          order?: Record<string, string | number | null>;
+          invoice?: Record<string, string | number | null>;
+          lines?: Record<string, string | number | null>[];
+        }>(
+          "/api/dashboard/" +
+            (isOrder ? "orders/" : "receivables/") +
+            encodeURIComponent(detail.kind.split(":")[1]!),
+          signal,
+        );
+        const rows: Record<string, string | number | null>[] = isOrder
+          ? (raw.lines || []).map((l) => ({
+              Product: l["product"] ?? "",
+              Quantity: l["quantity"] ?? 0,
+              "Unit price (paisa)": l["unit_price"] ?? 0,
+              "Unit cost (paisa)": l["unit_cost"] ?? 0,
+            }))
+          : Object.entries(raw.invoice || {}).map(([key, value]) => ({
+              Field: key.replaceAll("_", " "),
+              Value:
+                ["amount", "paid"].includes(key) && typeof value === "number"
+                  ? formatValue(value, "money", true)
+                  : value,
+            }));
+        const filtered = rows.filter((row) =>
+          Object.values(row).some((v) => String(v).toLowerCase().includes(search.toLowerCase())),
+        );
+        return {
+          columns: Object.keys(rows[0] || {}),
+          rows: filtered.slice((page - 1) * pageSize, page * pageSize),
+          recordCount: filtered.length,
+          page,
+          pageSize,
+          totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+          generatedAt: raw.generatedAt,
+        };
+      }
+      return api<DetailResult>(
+        (allowed ? "/api/dashboard/details" : "/api/dashboard/inventory/lowstock") +
+          "?" +
+          queryString +
+          "&" +
+          new URLSearchParams({
+            kind: detail?.kind || "",
+            page: String(page),
+            pageSize: String(pageSize),
+            q: search,
+          }),
+        signal,
+      );
+    },
+    enabled: !!detail,
+    staleTime: 0,
+    retry: false,
+  });
+  function preset(name: string) {
+    const today = context.data!.today;
+    const d = new Date(today + "T00:00:00Z");
+    let from = today;
+    let to = today;
+    if (name === "This Week") {
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+      from = d.toISOString().slice(0, 10);
+    }
+    if (name === "This Month") from = today.slice(0, 7) + "-01";
+    if (name === "This Quarter")
+      from =
+        today.slice(0, 4) +
+        "-" +
+        String(Math.floor(d.getUTCMonth() / 3) * 3 + 1).padStart(2, "0") +
+        "-01";
+    if (name === "This Year") from = today.slice(0, 4) + "-01-01";
+    if (name === "Dataset period") {
+      from = context.data!.sourceFirstOrderDate;
+      to = context.data!.sourceLastOrderDate;
+    }
+    setRange({ from, to });
+    setDateOpen(false);
+  }
   return (
-    <div className="dashboard-shell">
+    <div className="dashboard-shell spec-dashboard">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark">N</span>Nexora
+        <div className="brand">
+          <span className="brand-mark">M</span>Meridian
           <span className="brand-divider" />
           <small>WORKSPACE</small>
-        </a>
+        </div>
         <nav aria-label="Dashboard pages">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              className={tab === t ? "active" : ""}
-              onClick={() => {
-                setTab(t);
-                setDates(false);
-              }}
-            >
-              {t}
-            </button>
-          ))}
+          {tabs
+            .filter((t) => allowed || ["sales", "orders", "inventory"].includes(t.id))
+            .map((t) => (
+              <button
+                key={t.id}
+                aria-current={tab === t.id ? "page" : undefined}
+                className={tab === t.id ? "active" : ""}
+                onClick={() => {
+                  setTab(t.id);
+                  setChartPage(0);
+                  setDateOpen(false);
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
         </nav>
         <div className="header-right">
-          <span className="live-label">
-            <i />
-            Dataset connected
-          </span>
-          <span className="avatar" title="Analytics workspace">
-            AC
+          <span className="role-label">Demo workspace</span>
+          <span className="avatar" title={user.name}>
+            {user.name
+              .split(" ")
+              .map((x) => x[0])
+              .slice(0, 2)
+              .join("")}
           </span>
         </div>
       </header>
       <main className="dashboard-main">
         <div className="hero">
           <div>
-            <div className="eyebrow">YOUR BUSINESS, AT A GLANCE</div>
+            <div className="eyebrow">CLARITY FOR YOUR NEXT DECISION</div>
             <h1>
-              {tab === "Overview"
-                ? "Sales & Operations"
-                : tab === "Sales"
-                  ? "Sales intelligence"
-                  : tab === "Operations"
-                    ? "Operational performance"
-                    : tab === "Inventory"
-                      ? "Inventory overview"
-                      : "Receivables overview"}
+              {active.title}
               <span>.</span>
             </h1>
-            <p>Clarity in every number. Confidence in every decision.</p>
+            <p>
+              {tab === "sales"
+                ? "Revenue, order value and growth — with every number traceable."
+                : tab === "orders"
+                  ? "See what is moving, what is waiting and what needs attention."
+                  : tab === "inventory"
+                    ? "A clear view of stock, value and movement."
+                    : tab === "receivables"
+                      ? "Keep cash collection and overdue balances in focus."
+                      : tab === "performers"
+                        ? "Understand which products and customers contribute most."
+                        : "Measure the health and efficiency of your operations."}
+            </p>
           </div>
           <div className="hero-art">
             <span>
-              See the bigger picture.
+              One workspace.
               <br />
-              <b>Make your next move.</b>
+              <b>A clearer perspective.</b>
             </span>
-            <GlassOrb size={98} />
           </div>
         </div>
         <div className="toolbar">
           <div className="section-label">
-            <Layers3 size={15} />
-            {tab === "Overview" ? "Executive overview" : tab + " insights"}
+            <active.icon size={16} />
+            <span>{allowed ? "Management overview" : "Aggregate overview"}</span>
             <span className="toolbar-tag">PKR</span>
+            <button
+              className="definition-button"
+              onClick={() => setDefinitions(true)}
+              title="Metric definitions & data coverage"
+              aria-label="Metric definitions"
+            >
+              <Info size={15} />
+            </button>
           </div>
           <div className="toolbar-actions">
             <div className="date-wrap">
               <button
-                className={"control " + (dates ? "selected" : "")}
-                onClick={() => setDates(!dates)}
-                aria-expanded={dates}
+                className="control"
+                disabled={!context.data}
+                aria-expanded={dateOpen}
+                onClick={() => {
+                  setDraft(currentRange);
+                  setDateError("");
+                  setDateOpen(!dateOpen);
+                }}
               >
                 <CalendarDays size={15} />
-                {monthLabel(range.from)} – {monthLabel(range.to)}
-                <SlidersHorizontal size={13} />
+                {currentRange.to
+                  ? dateLabel(currentRange.from) + " – " + dateLabel(currentRange.to)
+                  : "Loading dates…"}
               </button>
-              {dates && (
+              {dateOpen && (
                 <div className="date-pop">
                   <strong>Reporting period</strong>
+                  <div className="date-presets">
+                    {[
+                      "Today",
+                      "This Week",
+                      "This Month",
+                      "This Quarter",
+                      "This Year",
+                      "Dataset period",
+                    ].map((p) => (
+                      <button key={p} onClick={() => preset(p)}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="eyebrow">CUSTOM RANGE</span>
                   <label>
                     From
-                    <select
-                      aria-label="Start month"
-                      value={range.from}
-                      onChange={(e) =>
-                        setRange({
-                          from: e.target.value,
-                          to: range.to < e.target.value ? e.target.value : range.to,
-                        })
-                      }
-                    >
-                      {ALL_MONTHS.map((x) => (
-                        <option key={x} value={x}>
-                          {monthLabel(x)}
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      type="date"
+                      aria-label="Start date"
+                      max={context.data?.today}
+                      value={draft.from}
+                      onChange={(e) => setDraft({ ...draft, from: e.target.value })}
+                    />
                   </label>
                   <label>
                     To
-                    <select
-                      aria-label="End month"
-                      value={range.to}
-                      onChange={(e) => setRange({ ...range, to: e.target.value })}
-                    >
-                      {ALL_MONTHS.filter((x) => x >= range.from).map((x) => (
-                        <option key={x} value={x}>
-                          {monthLabel(x)}
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      type="date"
+                      aria-label="End date"
+                      min={draft.from}
+                      max={context.data?.today}
+                      value={draft.to}
+                      onChange={(e) => setDraft({ ...draft, to: e.target.value })}
+                    />
                   </label>
-                  <div className="preset-row">
-                    <button onClick={() => setRange(FULL_RANGE)}>All time</button>
-                    <button onClick={() => setRange({ from: "2026-06", to: "2026-08" })}>
-                      Last 3 months
-                    </button>
-                  </div>
-                  <button className="primary-button" onClick={() => setDates(false)}>
-                    Apply period
+                  {dateError && (
+                    <span role="alert" className="error-message">
+                      {dateError}
+                    </span>
+                  )}
+                  <button
+                    className="primary-button"
+                    onClick={() => {
+                      if (
+                        !draft.from ||
+                        !draft.to ||
+                        draft.from > draft.to ||
+                        draft.to > (context.data?.today || "")
+                      ) {
+                        setDateError("Choose valid dates from start to end, up to today.");
+                        return;
+                      }
+                      setRange(draft);
+                      setDateOpen(false);
+                    }}
+                  >
+                    Apply range
                   </button>
                 </div>
               )}
             </div>
-            <button className="primary-button" onClick={() => download(exportData)}>
+            <button
+              className="primary-button"
+              disabled={!data.data}
+              onClick={() =>
+                csvDownload(
+                  active.title,
+                  ["Metric", "Value", "Definition", "Period", "Generated at"],
+                  metrics.map((k) => [
+                    k.label,
+                    formatValue(k.value, k.unit, true),
+                    k.description,
+                    k.snapshot ? "Current snapshot" : currentRange.from + " – " + currentRange.to,
+                    data.data?.[0]?.generatedAt || "",
+                  ]),
+                )
+              }
+            >
               <ArrowDownToLine size={15} />
-              Export report
+              <span>Export report</span>
             </button>
           </div>
         </div>
-        <div className="kpi-grid">
-          {kpis.map((k) => (
-            <button className="kpi" key={k.label} onClick={k.action}>
-              <div className="kpi-label">
-                <span className="kpi-icon">
-                  <k.icon size={17} />
-                </span>
-                {k.label}
-                <ArrowUpRight className="kpi-arrow" size={13} />
-              </div>
-              <div className="kpi-value">
-                <small>{k.unit}</small>
-                {k.value}
-              </div>
-              <div className="kpi-bottom">
-                <span className={k.warning ? "warning-text" : ""}>
-                  {k.warning && <i />}
-                  {k.note}
-                </span>
-                {k.values && <Sparkline values={k.values} width={65} height={23} />}
-              </div>
+        {data.isPending ? (
+          <div className="dashboard-loading">
+            <RefreshCw className="spin" size={22} />
+            <span>Calculating your dashboard…</span>
+          </div>
+        ) : data.error ? (
+          <div className="dashboard-loading">
+            <strong>Could not load this view</strong>
+            <p>{data.error.message}</p>
+            <button className="control" onClick={() => data.refetch()}>
+              Try again
             </button>
-          ))}
-        </div>
-        <div className={"module-grid " + (tab === "Overview" ? "overview-grid" : "focus-grid")}>
-          {tab === "Overview" ? (
-            <>
-              {trend}
-              {aging}
-              {health}
-              {operations}
-              {stock}
-              {ranking()}
-            </>
-          ) : tab === "Sales" ? (
-            <>
-              {trend}
-              {channels}
-              {ranking()}
-              {ranking(true)}
-            </>
-          ) : tab === "Operations" ? (
-            <>
-              {operations}
-              <Panel
-                title="Monthly delivery performance"
-                sub="Completed deliveries by order month"
-                className="trend-panel"
-              >
-                <div className="month-bars">
-                  {m.series.map((x) => (
-                    <button
-                      key={x.month}
-                      title={`${monthLabel(x.month)}: ${x.onTime} on time, ${x.delayed} delayed`}
-                      onClick={() => orderDetail("Delayed")}
-                    >
-                      <div className="month-stack">
-                        <div
-                          style={{ height: `${x.delivered ? (x.onTime / x.delivered) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <small>{monthLabel(x.month, true)}</small>
-                    </button>
-                  ))}
-                </div>
-                <div className="panel-foot">Blue: on time · Amber: delayed</div>
-              </Panel>
-              {stock}
-              {channels}
-            </>
-          ) : tab === "Inventory" ? (
-            <>
-              {health}
-              {stock}
-              {ranking(true)}
-              <Panel title="Stock by warehouse" sub="Current available units">
-                <div className="aging-bars">
-                  {[...new Set(dataset.inventory.map((x) => x.warehouse))].map((w) => (
-                    <button
-                      className="warehouse-row"
-                      key={w}
-                      onClick={() =>
-                        open({
-                          title: w,
-                          note: "Current stock snapshot",
-                          columns: ["Product", "Available", "State"],
-                          rows: dataset.inventory
-                            .filter((x) => x.warehouse === w)
-                            .map((x) => [x.name, x.avail, x.state]),
-                        })
-                      }
-                    >
-                      <Box size={18} />
-                      <span>{w}</span>
-                      <strong>
-                        {compactNumber(
-                          dataset.inventory
-                            .filter((x) => x.warehouse === w)
-                            .reduce((a, x) => a + x.avail, 0),
-                        )}
-                      </strong>
-                      <ArrowUpRight size={14} />
-                    </button>
-                  ))}
-                </div>
-              </Panel>
-            </>
-          ) : (
-            <>
-              {aging}
-              <Panel title="Collection overview" sub="Invoices linked to orders in selected period">
-                <div className="collection-value">
-                  {percent(r.collectionRate)}
-                  <span>of invoiced value collected</span>
-                </div>
-                <div className="delivery-track">
-                  <div style={{ width: `${r.collectionRate}%` }} />
-                </div>
-                <div className="ops-bottom">
-                  <div>
-                    <strong>{currency(r.collected)}</strong>
-                    <span>Collected</span>
+          </div>
+        ) : (
+          <>
+            <div className={"kpi-grid " + (metrics.length === 2 ? "two-kpis" : "")}>
+              {metrics.map((k) => (
+                <button
+                  key={k.id}
+                  className="kpi"
+                  title={
+                    canDetail(k.detail)
+                      ? k.description
+                      : "Aggregate only · detailed records require Manager access"
+                  }
+                  onClick={() => open(k.detail, k.label, k.description)}
+                  aria-disabled={!canDetail(k.detail)}
+                >
+                  <div className="kpi-label">
+                    <span className="kpi-icon">
+                      <active.icon size={16} />
+                    </span>
+                    {k.label}
+                    {k.snapshot && <span className="snapshot-badge">Snapshot</span>}
+                    {canDetail(k.detail) && <ArrowUpRight className="kpi-arrow" size={14} />}
                   </div>
-                  <div>
-                    <strong>{r.openInvoices}</strong>
-                    <span>Open invoices</span>
+                  <div className="kpi-value">
+                    <small>{k.unit === "money" ? "PKR" : k.unit === "days" ? "DAYS" : ""}</small>
+                    {formatValue(k.value, k.unit)}
                   </div>
-                </div>
-              </Panel>
-              <Panel
-                title="Largest open balances"
-                sub="Prioritize your next follow-up"
-                action={() => invoiceDetail()}
+                  <div className="kpi-bottom">
+                    <span>{k.description}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="mobile-chart-nav">
+              <button
+                className="icon-button"
+                aria-label="Previous chart"
+                disabled={chartPage === 0}
+                onClick={() => setChartPage(chartPage - 1)}
               >
-                <div className="rank-list">
-                  {invoicesInRange(range)
-                    .filter((x) => x.out > 0)
-                    .sort((a, b) => b.out - a.out)
-                    .slice(0, 5)
-                    .map((x, i) => (
-                      <button key={x.id} onClick={() => invoiceDetail(agingOf(x) || undefined)}>
-                        <span className="rank-num">{i + 1}</span>
-                        <span className="rank-name">
-                          <strong>{x.cn}</strong>
-                          <small>
-                            {x.id} · due {x.due}
-                          </small>
-                        </span>
-                        <span className="rank-value">
-                          <strong>{money(x.out)}</strong>
-                          <small>{agingOf(x)}</small>
-                        </span>
+                <ChevronLeft size={15} />
+              </button>
+              <span>
+                {panels[chartPage]?.title}{" "}
+                <small>
+                  {chartPage + 1} / {panels.length}
+                </small>
+              </span>
+              <button
+                className="icon-button"
+                aria-label="Next chart"
+                disabled={chartPage >= panels.length - 1}
+                onClick={() => setChartPage(chartPage + 1)}
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
+            <div className="module-grid specification-grid">
+              {panels.map((p, i) => (
+                <section key={p.id} className={"panel " + (i === chartPage ? "mobile-active" : "")}>
+                  <div className="panel-heading">
+                    <div>
+                      <h2>{p.title}</h2>
+                      <p title={p.subtitle}>{p.subtitle}</p>
+                    </div>
+                    {p.detail && canDetail(p.detail) && (
+                      <button
+                        className="icon-button"
+                        aria-label={"View " + p.title}
+                        onClick={() => open(p.detail!, p.title, p.subtitle)}
+                      >
+                        <ArrowUpRight size={16} />
                       </button>
-                    ))}
-                </div>
-              </Panel>
-              {ranking()}
-            </>
-          )}
-        </div>
+                    )}
+                  </div>
+                  <DataChart panel={p} onDetail={(kind) => open(kind, p.title, p.subtitle)} />
+                </section>
+              ))}
+            </div>
+          </>
+        )}
         <footer>
           <span>
             <i />
-            Source: Sales & Operations dataset <span className="dot-separator">·</span>{" "}
-            {compactNumber(dataset.orders.length)} orders
+            {data.isFetching ? "Refreshing…" : "Connected to source records"}
+            <span className="dot-separator">·</span>
+            {data.data?.[0]?.recordCount.toLocaleString() || "0"} records
           </span>
           <span>
-            Inventory & aging snapshot: 1 Sep 2026 <span className="dot-separator">·</span> All
-            amounts in PKR
+            {tab === "inventory"
+              ? "Stock updated " + (context.data?.inventoryUpdatedAt || "—")
+              : "Today: " + (context.data?.today || "—")}
+            <span className="dot-separator">·</span>PKT ·{" "}
+            {context.data?.sourceLastOrderDate
+              ? "Orders through " + dateLabel(context.data.sourceLastOrderDate)
+              : ""}
           </span>
         </footer>
       </main>
@@ -761,66 +609,121 @@ function Dashboard() {
           <Dialog.Content className="detail-drawer">
             <div className="drawer-heading">
               <div>
-                <div className="eyebrow">EXPLORE THE DETAILS</div>
+                <div className="eyebrow">TRACE THE NUMBER</div>
                 <Dialog.Title>{detail?.title}</Dialog.Title>
-                <Dialog.Description>{detail?.note}</Dialog.Description>
+                <Dialog.Description>
+                  {detail?.description || "Source records used for this selection."}
+                </Dialog.Description>
               </div>
               <Dialog.Close className="icon-button" aria-label="Close details">
                 <X size={20} />
               </Dialog.Close>
             </div>
+            {parentDetail && (
+              <button
+                className="text-link"
+                onClick={() => {
+                  open(parentDetail.kind, parentDetail.title, parentDetail.description);
+                  setParentDetail(null);
+                }}
+              >
+                <ChevronLeft size={14} />
+                Back to records
+              </button>
+            )}
             <div className="drawer-tools">
               <label>
                 <Search size={16} />
                 <input
+                  aria-label="Search records"
                   placeholder="Search records…"
-                  value={query}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                    setPage(0);
-                  }}
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
                 />
               </label>
               <button
                 className="control"
-                onClick={() => detail && download({ ...detail, rows: filtered })}
+                disabled={!detailQuery.data}
+                onClick={() => {
+                  const d = detailQuery.data!;
+                  csvDownload(
+                    detail?.title || "Records",
+                    d.columns,
+                    d.rows.map((r) => d.columns.map((c) => r[c] ?? null)),
+                  );
+                }}
               >
                 <ArrowDownToLine size={15} />
-                Export CSV
+                Export this page
               </button>
             </div>
+            {detailQuery.data?.basis && (
+              <div className="detail-basis">
+                COGS: {formatValue(detailQuery.data.basis.cogs, "money", true)} · Mean daily
+                inventory: {formatValue(detailQuery.data.basis.averageInventory, "money", true)} ·{" "}
+                {detailQuery.data.basis.days} days
+              </div>
+            )}
             <div className="detail-table">
-              <table>
-                <thead>
-                  <tr>
-                    {detail?.columns.map((c) => (
-                      <th key={c}>{c}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.slice(page * pageSize, (page + 1) * pageSize).map((row, i) => (
-                    <tr key={i}>
-                      {row.map((v, j) => (
-                        <td key={j}>{typeof v === "number" ? v.toLocaleString("en-US") : v}</td>
+              {detailQuery.isPending ? (
+                <div className="empty-state">Loading source records…</div>
+              ) : detailQuery.error ? (
+                <div className="empty-state" role="alert">
+                  {detailQuery.error.message}
+                </div>
+              ) : !detailQuery.data.rows.length ? (
+                <div className="empty-state">No records match this selection.</div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      {detailQuery.data.columns.map((c) => (
+                        <th key={c}>{c.replace("(paisa)", "(PKR)")}</th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!filtered.length && (
-                <div className="empty-state">No records match this selection.</div>
+                  </thead>
+                  <tbody>
+                    {detailQuery.data.rows.map((r, i) => (
+                      <tr key={i}>
+                        {detailQuery.data.columns.map((c) => (
+                          <td key={c} data-label={c.replace("(paisa)", "(PKR)")}>
+                            {(c === "Order" || c === "Invoice") && typeof r[c] === "string" ? (
+                              <button
+                                className="record-link"
+                                onClick={() => {
+                                  setParentDetail(detail);
+                                  open(
+                                    (c === "Order" ? "order:" : "invoice:") + r[c],
+                                    String(r[c]),
+                                    c === "Order" ? "Order line details" : "Invoice details",
+                                  );
+                                }}
+                              >
+                                {r[c]}
+                              </button>
+                            ) : c.includes("(paisa)") && typeof r[c] === "number" ? (
+                              formatValue(r[c] as number, "money", true)
+                            ) : (
+                              (r[c] ?? "—")
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
             <div className="pagination">
               <span>
-                {filtered.length.toLocaleString()} records · Page {page + 1} of {pages}
+                {detailQuery.data?.recordCount.toLocaleString() || 0} records · Page {page} of{" "}
+                {detailQuery.data?.totalPages || 1}
               </span>
               <div>
                 <button
                   className="control"
                   aria-label="Previous page"
-                  disabled={page === 0}
+                  disabled={page === 1}
                   onClick={() => setPage(page - 1)}
                 >
                   <ChevronLeft size={16} />
@@ -828,12 +731,68 @@ function Dashboard() {
                 <button
                   className="control"
                   aria-label="Next page"
-                  disabled={page + 1 >= pages}
+                  disabled={!detailQuery.data || page >= detailQuery.data.totalPages}
                   onClick={() => setPage(page + 1)}
                 >
                   <ChevronRight size={16} />
                 </button>
               </div>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={definitions} onOpenChange={setDefinitions}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="drawer-overlay" />
+          <Dialog.Content className="definitions-dialog">
+            <div className="drawer-heading">
+              <div>
+                <Dialog.Title>Definitions & data coverage</Dialog.Title>
+                <Dialog.Description>
+                  Architecture and Metric Definition document · September 2026
+                </Dialog.Description>
+              </div>
+              <Dialog.Close className="icon-button" aria-label="Close definitions">
+                <X size={20} />
+              </Dialog.Close>
+            </div>
+            <div className="definition-content">
+              {metrics.map((k) => (
+                <div key={k.id}>
+                  <strong>{k.label}</strong>
+                  <p>
+                    {k.description}
+                    {k.snapshot ? " · Unaffected by the date filter." : "."}
+                  </p>
+                </div>
+              ))}
+              <div>
+                <strong>Reporting basis</strong>
+                <p>
+                  Inclusive dates. Sales use order dates and line quantity × sale price. Cancelled
+                  orders are excluded. Customer rankings use order totals. Inventory alerts use
+                  on-hand quantities. Outstanding and overdue balances are current snapshots.
+                </p>
+              </div>
+              <div>
+                <strong>Source limitations</strong>
+                <p>
+                  Status-transition history and retail/wholesale classification are not supplied.
+                  Inventory turnover uses average daily closing inventory at the supplied product
+                  cost. Repeat customers exclude cancelled orders.
+                </p>
+              </div>
+              {context.data?.importSummary && (
+                <div>
+                  <strong>Import validation</strong>
+                  <p>
+                    {context.data.importSummary.accepted["orders"]} orders accepted;{" "}
+                    {context.data.importSummary.rejected["orders"]} rejected. Confirmed and
+                    Partially Returned are outside the permitted status list. Dependent records were
+                    rejected too; the full report is stored with the database.
+                  </p>
+                </div>
+              )}
             </div>
           </Dialog.Content>
         </Dialog.Portal>

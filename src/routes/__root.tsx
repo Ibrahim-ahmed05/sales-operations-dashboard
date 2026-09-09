@@ -77,14 +77,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Nexora | Sales & Operations" },
+      { title: "Meridian | Sales & Operations" },
       {
         name: "description",
         content:
           "Sales, delivery, inventory and receivables intelligence from your operational dataset.",
       },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Nexora | Sales & Operations" },
+      { property: "og:title", content: "Meridian | Sales & Operations" },
       {
         property: "og:description",
         content:
