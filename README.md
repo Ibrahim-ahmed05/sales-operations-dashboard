@@ -1,24 +1,30 @@
-# Pixel Perfect Replication
+# Meridian Dashboard
 
-Implement exactly the screenshot and nothing else
+Meridian is a sales and operations dashboard backed by the supplied SQLite dataset.
 
-This project was built with [Lovable](https://lovable.dev).
+## Run locally
 
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/f8db161e-c370-48d8-bbdb-e4ee29b2666a).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Use Node.js 24 or newer:
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+npm install
 npm run dev
 ```
+
+## Build and start in production
+
+```sh
+npm run build
+npm start
+```
+
+The deployed runtime needs `var/dashboard.sqlite`, which contains the imported source data and metadata. It is intentionally included in the project while local credentials, reports, and temporary files remain ignored.
+
+## Useful checks
+
+```sh
+npm test
+npm run lint
+```
+
+The dashboard opens directly in its demo workspace. Authentication endpoints and role handling remain available for deployments that later require secured access.

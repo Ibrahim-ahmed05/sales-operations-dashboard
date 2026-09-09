@@ -312,7 +312,7 @@ function Workspace({ user }: { user: User }) {
         <div className="brand">
           <span className="brand-mark">M</span>Meridian
           <span className="brand-divider" />
-          <small>WORKSPACE</small>
+          <small>{active.title}</small>
         </div>
         <nav aria-label="Dashboard pages">
           {tabs
@@ -344,35 +344,6 @@ function Workspace({ user }: { user: User }) {
         </div>
       </header>
       <main className="dashboard-main">
-        <div className="hero">
-          <div>
-            <div className="eyebrow">CLARITY FOR YOUR NEXT DECISION</div>
-            <h1>
-              {active.title}
-              <span>.</span>
-            </h1>
-            <p>
-              {tab === "sales"
-                ? "Revenue, order value and growth — with every number traceable."
-                : tab === "orders"
-                  ? "See what is moving, what is waiting and what needs attention."
-                  : tab === "inventory"
-                    ? "A clear view of stock, value and movement."
-                    : tab === "receivables"
-                      ? "Keep cash collection and overdue balances in focus."
-                      : tab === "performers"
-                        ? "Understand which products and customers contribute most."
-                        : "Measure the health and efficiency of your operations."}
-            </p>
-          </div>
-          <div className="hero-art">
-            <span>
-              One workspace.
-              <br />
-              <b>A clearer perspective.</b>
-            </span>
-          </div>
-        </div>
         <div className="toolbar">
           <div className="section-label">
             <active.icon size={16} />

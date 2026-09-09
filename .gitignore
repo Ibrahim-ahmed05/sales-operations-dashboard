@@ -35,3 +35,8 @@ dist-ssr
 var/
 tmp/
 .env
+
+# The imported runtime database is required by the deployed dashboard.
+!var/
+var/*
+!var/dashboard.sqlite
