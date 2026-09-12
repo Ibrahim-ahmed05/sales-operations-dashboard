@@ -1985,6 +1985,94 @@ button:hover:not(:disabled) {
     gap: 6px;
   }
 }
+/* Very short desktops/laptops (e.g. 1366×768 with browser chrome ~633px usable) */
+@media (max-height: 700px) and (min-width: 761px) {
+  .spec-dashboard .topbar {
+    height: 48px;
+  }
+  .spec-dashboard .dashboard-main {
+    height: calc(100% - 48px);
+    grid-template-rows: 30px 108px minmax(0, 1fr) 20px;
+    gap: 7px;
+    padding: 0 20px;
+  }
+  .spec-dashboard .hero h1 {
+    font-size: 23px;
+  }
+  .spec-dashboard .hero p {
+    display: none;
+  }
+  .spec-dashboard .hero .eyebrow {
+    display: none;
+  }
+  .spec-dashboard .kpi {
+    padding: 8px 12px;
+    border-radius: 10px;
+  }
+  .spec-dashboard .kpi-value {
+    font-size: 23px;
+    margin: 1px 0;
+  }
+  .spec-dashboard .kpi-label {
+    font-size: 10px;
+  }
+  .spec-dashboard .kpi-bottom {
+    font-size: 8px;
+    min-height: 10px;
+  }
+  .specification-grid .panel {
+    padding: 9px 12px;
+  }
+  .specification-grid .panel-heading {
+    margin-bottom: 4px;
+  }
+  .specification-grid .panel-heading p {
+    display: none;
+  }
+  .spec-dashboard footer {
+    font-size: 7px;
+  }
+  .donut-ring {
+    width: 88px;
+    height: 88px;
+    padding: 10px;
+  }
+  .donut-ring strong {
+    font-size: 16px;
+  }
+  .donut-legend {
+    gap: 4px;
+  }
+  .donut-legend button {
+    font-size: 10px;
+  }
+  .ops-main > strong {
+    font-size: 22px;
+  }
+  .ops-bottom strong {
+    font-size: 15px;
+  }
+  .panel-foot {
+    padding-top: 4px;
+    margin-top: 3px;
+    font-size: 7px;
+  }
+  .mini-table > button {
+    padding: 2px 0;
+  }
+  .rank-list > button {
+    padding: 2px 0;
+  }
+  .collection-value {
+    font-size: 24px;
+    margin: 2px 0 8px;
+  }
+  .insight {
+    margin-top: 4px;
+    padding: 5px;
+    font-size: 7px;
+  }
+}
 @media (max-width: 1150px) and (min-width: 761px) {
   .spec-dashboard .dashboard-main {
     padding: 0 18px;
@@ -2255,8 +2343,8 @@ button:hover:not(:disabled) {
   }
 }
 
-/* Compact screens: let the dashboard flow vertically so no module is cropped. */
-@media (max-width: 900px) {
+/* Mobile only: vertical scroll layout (≤ 760px handled below; 761–900px stays fixed) */
+@media (max-width: 760px) {
   .spec-dashboard {
     height: auto;
     min-height: 100dvh;
@@ -2346,6 +2434,95 @@ button:hover:not(:disabled) {
   }
 }
 
+/* Small tablets and narrow laptops (761-900px): fitted no-scroll layout */
+@media (min-width: 761px) and (max-width: 900px) {
+  .spec-dashboard {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .spec-dashboard .topbar {
+    height: 58px;
+    padding: 0 18px;
+    flex-wrap: nowrap;
+  }
+  .spec-dashboard .topbar nav {
+    order: 0;
+    width: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 2px;
+  }
+  .spec-dashboard .topbar nav button {
+    font-size: 9px;
+    padding: 7px 7px;
+  }
+  .spec-dashboard .dashboard-main {
+    height: calc(100% - 58px);
+    display: grid;
+    grid-template-rows: 36px 120px minmax(0, 1fr) 26px;
+    gap: 8px;
+    padding: 0 16px;
+  }
+  .spec-dashboard .hero {
+    height: auto;
+  }
+  .spec-dashboard .hero h1 {
+    font-size: 22px;
+  }
+  .spec-dashboard .hero p {
+    display: none;
+  }
+  .spec-dashboard .toolbar {
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .spec-dashboard .toolbar-actions {
+    margin-left: auto;
+    flex-wrap: nowrap;
+  }
+  .spec-dashboard .kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .spec-dashboard .kpi-grid.two-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .spec-dashboard .kpi {
+    min-height: 0;
+    padding: 8px 10px;
+  }
+  .spec-dashboard .kpi-value {
+    font-size: 22px;
+  }
+  .spec-dashboard .kpi-label {
+    font-size: 10px;
+  }
+  .specification-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    min-height: 0;
+  }
+  .specification-grid > .panel,
+  .specification-grid > .panel.mobile-active {
+    display: flex;
+    min-height: 0;
+    height: auto;
+  }
+  .mobile-chart-nav {
+    display: none;
+  }
+  .specification-grid .panel-heading p {
+    font-size: 9px;
+  }
+  .data-chart.bar-chart {
+    min-height: 0;
+  }
+  .bar-label {
+    font-size: 9px;
+  }
+}
+
 @media (max-width: 520px) {
   .spec-dashboard .topbar {
     padding: 9px 12px;
@@ -2403,28 +2580,27 @@ button:hover:not(:disabled) {
   }
 }
 
-/* Laptop-sized viewports need a little more vertical room for chart labels. */
+/* Laptop viewports (901–1450px): strict no-scroll, fit to viewport height */
 @media (min-width: 901px) and (max-width: 1450px) {
   .spec-dashboard {
-    height: auto;
-    min-height: 100dvh;
-    overflow-x: hidden;
-    overflow-y: auto;
+    height: 100dvh;
+    overflow: hidden;
   }
   .spec-dashboard .dashboard-main {
-    height: auto;
-    min-height: calc(100dvh - 54px);
-    grid-template-rows: 40px 150px auto 28px;
+    height: calc(100% - 62px);
+    display: grid;
+    grid-template-rows: 40px minmax(0, 148px) minmax(0, 1fr) 28px;
+    gap: 10px;
   }
   .specification-grid {
-    min-height: 468px;
+    min-height: 0;
   }
   .specification-grid .panel {
-    min-height: 222px;
+    min-height: 0;
     overflow: hidden;
   }
   .data-chart.bar-chart {
-    min-height: 200px;
+    min-height: 0;
   }
   .bar-label {
     font-size: 10px;
